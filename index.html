@@ -1,0 +1,638 @@
+	<!DOCTYPE html>
+	<html lang="zh-CN">
+	<head>
+	    <meta charset="UTF-8">
+	    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	    <title>🎄 圣诞树动画 - Merry Christmas</title>
+	    <style>
+	        * {
+	            margin: 0;
+	            padding: 0;
+	            box-sizing: border-box;
+	        }
+	        body {
+	            display: flex;
+	            flex-direction: column;
+	            justify-content: center;
+	            align-items: center;
+	            min-height: 100vh;
+	            background: #0a0a0a;
+	            font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+	            overflow: hidden;
+	        }
+	        .container {
+	            display: flex;
+	            flex-direction: column;
+	            align-items: center;
+	            gap: 15px;
+	        }
+	        .canvas-wrapper {
+	            position: relative;
+	            border-radius: 16px;
+	            overflow: hidden;
+	            box-shadow: 0 20px 80px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
+	        }
+	        canvas {
+	            display: block;
+	            cursor: grab;
+	        }
+	        canvas:active {
+	            cursor: grabbing;
+	        }
+	        .title-bar {
+	            color: rgba(255, 255, 255, 0.9);
+	            font-size: 14px;
+	            letter-spacing: 3px;
+	            text-transform: uppercase;
+	            opacity: 0.6;
+	        }
+	        .controls {
+	            display: flex;
+	            gap: 8px;
+	            flex-wrap: wrap;
+	            justify-content: center;
+	            max-width: 600px;
+	        }
+	        .style-btn {
+	            padding: 8px 18px;
+	            border: 1px solid rgba(255, 255, 255, 0.2);
+	            border-radius: 20px;
+	            background: rgba(255, 255, 255, 0.05);
+	            color: rgba(255, 255, 255, 0.7);
+	            font-size: 13px;
+	            cursor: pointer;
+	            transition: all 0.3s ease;
+	            backdrop-filter: blur(5px);
+	        }
+	        .style-btn:hover {
+	            background: rgba(255, 255, 255, 0.15);
+	            color: #fff;
+	            transform: translateY(-2px);
+	        }
+	        .style-btn.active {
+	            background: rgba(255, 215, 0, 0.15);
+	            border-color: rgba(255, 215, 0, 0.6);
+	            color: #FFD700;
+	            box-shadow: 0 0 15px rgba(255, 215, 0, 0.2);
+	        }
+	        .toolbar {
+	            display: flex;
+	            gap: 15px;
+	            align-items: center;
+	        }
+	        .toolbar-btn {
+	            padding: 6px 16px;
+	            border: 1px solid rgba(255, 255, 255, 0.15);
+	            border-radius: 15px;
+	            background: transparent;
+	            color: rgba(255, 255, 255, 0.5);
+	            font-size: 12px;
+	            cursor: pointer;
+	            transition: all 0.2s ease;
+	        }
+	        .toolbar-btn:hover {
+	            color: #fff;
+	            border-color: rgba(255, 255, 255, 0.4);
+	        }
+	        .hint {
+	            color: rgba(255, 255, 255, 0.3);
+	            font-size: 11px;
+	            text-align: center;
+	        }
+	        .fps-display {
+	            position: absolute;
+	            top: 10px;
+	            left: 12px;
+	            color: rgba(255, 255, 255, 0.4);
+	            font-size: 10px;
+	            font-family: monospace;
+	        }
+	    </style>
+	</head>
+	<body>
+	    <div class="container">
+	        <div class="title-bar">Christmas Tree Generator</div>
+	        <div class="canvas-wrapper">
+	            <canvas id="treeCanvas" width="480" height="600"></canvas>
+	            <div class="fps-display" id="fpsDisplay"></div>
+	        </div>
+	        <div class="toolbar">
+	            <button class="toolbar-btn" id="pauseBtn">⏸ 暂停</button>
+	            <button class="toolbar-btn" id="resetBtn">↻ 重置</button>
+	            <button class="toolbar-btn" id="saveBtn">📷 截图</button>
+	        </div>
+	        <div class="controls" id="styleButtons"></div>
+	        <div class="hint">拖拽旋转 · 双击恢复自动旋转 · 滚轮缩放</div>
+	    </div>
+	    <script>
+	        'use strict';
+	        // ==================== 随机种子生成器 ====================
+	        // 对应 MATLAB: rng(2025)
+	        function SeededRandom(seed) {
+	            this.seed = seed;
+	            this.next = function () {
+	                this.seed = (this.seed * 9301 + 49297) % 233280;
+	                return this.seed / 233280;
+	            };
+	            this.nextRange = function (min, max) {
+	                return min + this.next() * (max - min);
+	            };
+	            this.nextInt = function (min, max) { // [min, max] inclusive
+	                return Math.floor(this.nextRange(min, max + 1));
+	            };
+	        }
+	        // ==================== 风格配置 ====================
+	        // 完全对应 MATLAB get_style() 函数
+	        const STYLES = {
+	            1: {
+	                name: 'Classic Gold',
+	                bg_col: '#0f0505',
+	                tree_cols: ['#0B3D0B', '#144514', '#006400'],
+	                trunk_col: '#3e2723',
+	                decor_cols: ['#FFD700', '#CCA43B', '#8B0000'],
+	                star_col: '#FFD700',
+	                text_col: '#FFD700',
+	                snow_col: '#FFFFFF',
+	                has_ribbon: true,
+	                ribbon_col: '#D4AF37',
+	                ribbon_width: 4.5
+	            },
+	            2: {
+	                name: 'Ice & Blue',
+	                bg_col: '#F0F2F5',
+	                tree_cols: ['#2F4F4F', '#5F9EA0', '#708090'],
+	                trunk_col: '#696969',
+	                decor_cols: ['#B0C4DE', '#FFFAF0', '#E0FFFF'],
+	                star_col: '#B0C4DE',
+	                text_col: '#708090',
+	                snow_col: '#87CEFA',
+	                has_ribbon: true,
+	                ribbon_col: '#B0C4DE',
+	                ribbon_width: 4.5
+	            },
+	            3: {
+	                name: 'Vintage Forest',
+	                bg_col: '#1a1a1a',
+	                tree_cols: ['#556B2F', '#6B8E23', '#808000'],
+	                trunk_col: '#5D4037',
+	                decor_cols: ['#CD853F', '#FFCC00'],
+	                star_col: '#FFCC00',
+	                text_col: '#DEB887',
+	                snow_col: '#FFFFFF',
+	                has_ribbon: false,
+	                ribbon_col: null,
+	                ribbon_width: 0
+	            },
+	            4: {
+	                name: 'Colorful Neon',
+	                bg_col: '#101010',
+	                tree_cols: ['#006400', '#228B22'],
+	                trunk_col: '#4E342E',
+	                decor_cols: ['#FF0000', '#00FF00', '#0000FF', '#FFFF00'],
+	                star_col: '#FFD700',
+	                text_col: '#FF6347',
+	                snow_col: '#FFFFFF',
+	                has_ribbon: true,
+	                ribbon_col: '#C0C0C0',
+	                ribbon_width: 3.0
+	            },
+	            5: {
+	                name: 'Minimalist BW',
+	                bg_col: '#000000',
+	                tree_cols: ['#111111', '#050505'],
+	                trunk_col: '#222222',
+	                decor_cols: ['#FFFFFF', '#FFFFE0'],
+	                star_col: '#FFFFFF',
+	                text_col: '#FFFFFF',
+	                snow_col: '#4D4D4D',
+	                has_ribbon: true,
+	                ribbon_col: '#FFFFFF',
+	                ribbon_width: 2.4
+	            },
+	            6: {
+	                name: 'Pink Romance',
+	                bg_col: '#1F0F12',
+	                tree_cols: ['#D87093', '#FF69B4', '#FFB6C1'],
+	                trunk_col: '#4A3728',
+	                decor_cols: ['#FFFFFF', '#FFD700', '#FF1493'],
+	                star_col: '#FFD700',
+	                text_col: '#FFC0CB',
+	                snow_col: '#FFF0F5',
+	                has_ribbon: true,
+	                ribbon_col: '#F8F8FF',
+	                ribbon_width: 2.4
+	            }
+	        };
+	        // ==================== 全局状态 ====================
+	        let currentStyleId = 1;
+	        let cfg = STYLES[currentStyleId];
+	        const canvas = document.getElementById('treeCanvas');
+	        const ctx = canvas.getContext('2d');
+	        const W = canvas.width;
+	        const H = canvas.height;
+	        // 动画参数 (对应 MATLAB n_frames = 90)
+	        const N_FRAMES = 90;
+	        let frame = 0;
+	        let angle = 0;
+	        let isPaused = false;
+	        let isDragging = false;
+	        let autoRotate = true;
+	        let zoom = 1.0;
+	        let dragStartX = 0;
+	        let dragStartAngle = 0;
+	        // 投影缩放 - 对应 MATLAB 坐标系 [-0.8, 0.8] x [-0.8, 0.9]
+	        const SCALE = Math.min(W / 1.6, H / 1.7);
+	        // 数据存储
+	        let staticData = [];
+	        let snowData = [];
+	        let starPoints = [];
+	        // FPS 计算
+	        let lastTime = performance.now();
+	        let fpsCount = 0;
+	        let fpsTimer = 0;
+	        const fpsDisplay = document.getElementById('fpsDisplay');
+	        // ==================== 工具函数 ====================
+	        function hexToRgb(hex) {
+	            const r = parseInt(hex.slice(1, 3), 16);
+	            const g = parseInt(hex.slice(3, 5), 16);
+	            const b = parseInt(hex.slice(5, 7), 16);
+	            return { r, g, b };
+	        }
+	        function rgbaStr(hex, alpha) {
+	            const c = hexToRgb(hex);
+	            return `rgba(${c.r},${c.g},${c.b},${alpha})`;
+	        }
+	        // 生成五角星顶点 (对应 MATLAB star_angles / star_radii)
+	        function getStarVertices(cx, cy, outerR) {
+	            const pts = [];
+	            // 对应: linspace(pi/2, 2.5*pi, 11) 和 [0.05, 0.02] 交替
+	            for (let i = 0; i < 10; i++) {
+	                const angle = Math.PI / 2 + (i / 10) * Math.PI * 2;
+	                const radius = (i % 2 === 0) ? outerR : outerR * 0.4;
+	                pts.push({
+	                    x: cx + radius * Math.cos(angle),
+	                    y: cy + radius * Math.sin(angle) * -1 // canvas Y轴翻转
+	                });
+	            }
+	            return pts;
+	        }
+	        // ==================== 数据生成 ====================
+	        // 对应 MATLAB 的数据生成部分
+	        function generateTreeData(styleCfg, rand) {
+	            const data = [];
+	            // --- 树叶 (n_leaves = 8000) ---
+	            const nLeaves = 6000; // 适当减少以优化浏览器性能
+	            for (let i = 0; i < nLeaves; i++) {
+	                const hLeaf = rand.next();
+	                const baseR = 1 - hLeaf;
+	                const layerCycle = (hLeaf * 7) % 1;
+	                const rLeaf = baseR * 0.65 * (0.4 + 0.6 * Math.pow(1 - layerCycle, 0.7));
+	                const thetaLeaf = rand.next() * Math.PI * 2;
+	                data.push({
+	                    x: rLeaf * Math.cos(thetaLeaf),
+	                    y: hLeaf - 0.5,
+	                    z: rLeaf * Math.sin(thetaLeaf),
+	                    col: styleCfg.tree_cols[rand.nextInt(0, styleCfg.tree_cols.length - 1)],
+	                    size: rand.nextRange(5, 15), // MATLAB: rand * 10 + 5
+	                    type: 1
+	                });
+	            }
+	            // --- 树干 (n_trunk = 1000) ---
+	            const nTrunk = 800;
+	            const rTrunk = 0.12;
+	            for (let i = 0; i < nTrunk; i++) {
+	                const hTrunk = rand.next() * 0.25 - 0.7;
+	                const thetaTrunk = rand.next() * Math.PI * 2;
+	                data.push({
+	                    x: rTrunk * Math.cos(thetaTrunk),
+	                    y: hTrunk,
+	                    z: rTrunk * Math.sin(thetaTrunk),
+	                    col: styleCfg.trunk_col,
+	                    size: 4, // MATLAB: 4
+	                    type: 2
+	                });
+	            }
+	            // --- 装饰球 (n_decor = 600) ---
+	            const nDecor = 600;
+	            for (let i = 0; i < nDecor; i++) {
+	                const hDec = rand.next() * 0.95;
+	                const layerCycleDec = (hDec * 7) % 1;
+	                const rDec = (1 - hDec) * 0.68 * (0.4 + 0.6 * Math.pow(1 - layerCycleDec, 0.7));
+	                const thetaDec = rand.next() * Math.PI * 2;
+	                data.push({
+	                    x: rDec * Math.cos(thetaDec),
+	                    y: hDec - 0.5,
+	                    z: rDec * Math.sin(thetaDec),
+	                    col: styleCfg.decor_cols[rand.nextInt(0, styleCfg.decor_cols.length - 1)],
+	                    size: rand.nextRange(10, 25), // MATLAB: rand * 15 + 10
+	                    type: 3
+	                });
+	            }
+	            // --- 丝带 (n_rib = 6000) ---
+	            if (styleCfg.has_ribbon) {
+	                const nRib = 4000; // 适当减少
+	                for (let i = 0; i < nRib; i++) {
+	                    const hRib = (i / nRib) * 0.95;
+	                    const baseRRib = (1 - hRib) * 0.65 * 1.05;
+	                    // MATLAB: theta_rib = 10 * pi * h_rib
+	                    const thetaRib = 10 * Math.PI * hRib;
+	                    data.push({
+	                        x: baseRRib * Math.cos(thetaRib),
+	                        y: hRib - 0.5,
+	                        z: baseRRib * Math.sin(thetaRib),
+	                        col: styleCfg.ribbon_col,
+	                        size: styleCfg.ribbon_width * 3, // MATLAB: ribbon_width * 3
+	                        type: 4
+	                    });
+	                }
+	            }
+	            return data;
+	        }
+	        // 生成雪花数据 (对应 MATLAB snow 部分)
+	        function generateSnow(nSnow, rand) {
+	            const snow = [];
+	            for (let i = 0; i < nSnow; i++) {
+	                snow.push({
+	                    x: rand.next() * 2 - 1,
+	                    y: rand.next() * 2 - 0.8,
+	                    z: rand.next() * 2 - 1,
+	                    speed: rand.next() * 0.02 + 0.015, // MATLAB: rand * 0.02 + 0.015
+	                    size: rand.next() * 5 + 2, // MATLAB: rand * 5 + 2
+	                    phase: rand.next() * Math.PI * 2 // 额外添加摆动相位
+	                });
+	            }
+	            return snow;
+	        }
+	        // ==================== 场景初始化 ====================
+	        function initScene() {
+	            const rand = new SeededRandom(2025);
+	            staticData = generateTreeData(cfg, rand);
+	            snowData = generateSnow(250, rand);
+	            starPoints = getStarVertices(0, 0, 1); // 单位星，渲染时缩放
+	        }
+	        // ==================== 渲染函数 ====================
+	        function render() {
+	            // 背景
+	            ctx.fillStyle = cfg.bg_col;
+	            ctx.fillRect(0, 0, W, H);
+	            const cx = W / 2;
+	            const cy = H / 2 + H * 0.03;
+	            const scale = SCALE * zoom;
+	            const cosA = Math.cos(angle);
+	            const sinA = Math.sin(angle);
+	            // --- 收集所有渲染点 ---
+	            const renderPoints = [];
+	            // 静态数据（树+树干+装饰+丝带）旋转
+	            for (let i = 0; i < staticData.length; i++) {
+	                const p = staticData[i];
+	                // MATLAB: x_rot = x*cos(angle) - z*sin(angle)
+	                //         z_rot = z*cos(angle) + x*sin(angle)
+	                const xRot = p.x * cosA - p.z * sinA;
+	                const zRot = p.z * cosA + p.x * sinA;
+	                // MATLAB 透视投影: depth = 1/(2.5 - z), 投影乘 depth * 2
+	                const depth = 1 / (2.5 - zRot);
+	                const xProj = cx + xRot * depth * 2 * scale;
+	                const yProj = cy - p.y * depth * 2 * scale;
+	                const sizeVis = p.size * depth * 2 * zoom * 0.1;
+	                // 深度渐变透明度
+	                let alpha = 0.8; // MATLAB: MarkerFaceAlpha = 0.8
+	                if (p.type === 1) { // 树叶
+	                    alpha = 0.8 * Math.max(0.1, (zRot + 1) / 2);
+	                }
+	                renderPoints.push({
+	                    x: xProj,
+	                    y: yProj,
+	                    z: zRot,
+	                    color: p.col,
+	                    size: sizeVis,
+	                    alpha: alpha,
+	                    type: p.type
+	                });
+	            }
+	            // 雪花 - 下落动画
+	            const time = frame;
+	            for (let i = 0; i < snowData.length; i++) {
+	                const s = snowData[i];
+	                // MATLAB: snow_y = -0.8 + mod(snow.y - f*speed + 0.8, 2)
+	                const snowY = -0.8 + (((s.y - time * s.speed + 0.8) % 2) + 2) % 2;
+	                // 添加轻微水平摆动
+	                const swayX = Math.sin(time * 0.05 + s.phase) * 0.03;
+	                const depth = 1 / (2.5 - s.z);
+	                const xProj = cx + (s.x + swayX) * depth * 2 * scale;
+	                const yProj = cy - snowY * depth * 2 * scale;
+	                const sizeVis = s.size * depth * 2 * zoom * 0.1;
+	                renderPoints.push({
+	                    x: xProj,
+	                    y: yProj,
+	                    z: s.z,
+	                    color: cfg.snow_col,
+	                    size: sizeVis,
+	                    alpha: 0.7,
+	                    type: 5 // snow
+	                });
+	            }
+	            // --- 深度排序 (Painter's Algorithm) ---
+	            // MATLAB: [~, idx] = sort(current_z);
+	            renderPoints.sort((a, b) => a.z - b.z);
+	            // --- 绘制所有点 ---
+	            for (let i = 0; i < renderPoints.length; i++) {
+	                const p = renderPoints[i];
+	                // 视野裁剪
+	                if (p.x < -20 || p.x > W + 20 || p.y < -20 || p.y > H + 20) continue;
+	                ctx.globalAlpha = p.alpha;
+	                ctx.fillStyle = p.color;
+	                const drawSize = Math.max(0.5, p.size);
+	                ctx.beginPath();
+	                ctx.arc(p.x, p.y, drawSize, 0, Math.PI * 2);
+	                ctx.fill();
+	            }
+	            ctx.globalAlpha = 1;
+	            // --- 绘制五角星 ---
+	            drawStar(cx, cy - 0.41 * scale * 2, 0.07 * scale);
+	            // --- 绘制文字 ---
+	            drawText(cx, cy - 0.65 * scale * 2);
+	            // --- 绘制地面反射效果 ---
+	            drawGround(cx, cy + 0.62 * scale);
+	        }
+	        // 绘制五角星
+	        function drawStar(cx, cy, radius) {
+	            const time = frame * 0.1;
+	            const pulse = 0.85 + 0.15 * Math.sin(time * 3);
+	            const starR = radius * pulse;
+	            // 发光效果
+	            ctx.save();
+	            const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, starR * 4);
+	            glow.addColorStop(0, rgbaStr(cfg.star_col, 0.35));
+	            glow.addColorStop(0.5, rgbaStr(cfg.star_col, 0.15));
+	            glow.addColorStop(1, 'rgba(0,0,0,0)');
+	            ctx.fillStyle = glow;
+	            ctx.beginPath();
+	            ctx.arc(cx, cy, starR * 4, 0, Math.PI * 2);
+	            ctx.fill();
+	            ctx.restore();
+	            // 主星体 (MATLAB: fill with EdgeColor='white')
+	            const pts = getStarVertices(cx, cy, starR);
+	            ctx.save();
+	            ctx.fillStyle = cfg.star_col;
+	            ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+	            ctx.lineWidth = 0.5;
+	            ctx.beginPath();
+	            ctx.moveTo(pts[0].x, pts[0].y);
+	            for (let i = 1; i < pts.length; i++) {
+	                ctx.lineTo(pts[i].x, pts[i].y);
+	            }
+	            ctx.closePath();
+	            ctx.fill();
+	            ctx.stroke();
+	            ctx.restore();
+	            // 内部高光
+	            const innerPts = getStarVertices(cx, cy, starR * 0.55);
+	            ctx.save();
+	            ctx.fillStyle = 'rgba(255,255,200,0.5)';
+	            ctx.beginPath();
+	            ctx.moveTo(innerPts[0].x, innerPts[0].y);
+	            for (let i = 1; i < innerPts.length; i++) {
+	                ctx.lineTo(innerPts[i].x, innerPts[i].y);
+	            }
+	            ctx.closePath();
+	            ctx.fill();
+	            ctx.restore();
+	        }
+	        // 绘制文字 (MATLAB: text(0, 0.65, 'Merry Christmas', FontSize=40))
+	        function drawText(cx, cy) {
+	            ctx.save();
+	            ctx.font = `italic bold 34px 'Brush Script MT', 'Segoe Script', cursive`;
+	            ctx.textAlign = 'center';
+	            ctx.textBaseline = 'middle';
+	            // 文字发光
+	            ctx.shadowColor = cfg.text_col;
+	            ctx.shadowBlur = 20;
+	            ctx.fillStyle = cfg.text_col;
+	            ctx.fillText('Merry Christmas', cx, cy);
+	            // 第二层增强亮度
+	            ctx.shadowBlur = 0;
+	            ctx.globalAlpha = 0.5;
+	            ctx.fillText('Merry Christmas', cx, cy);
+	            ctx.restore();
+	        }
+	        // 绘制地面装饰
+	        function drawGround(cx, cy) {
+	            ctx.save();
+	            ctx.globalAlpha = 0.06;
+	            // 椭圆地面阴影
+	            ctx.fillStyle = cfg.star_col;
+	            ctx.beginPath();
+	            ctx.ellipse(cx, cy + 20, SCALE * zoom * 0.5, SCALE * zoom * 0.08, 0, 0, Math.PI * 2);
+	            ctx.fill();
+	            ctx.restore();
+	        }
+	        // ==================== UI 控制 ====================
+	        // 主题按钮
+	        const buttonContainer = document.getElementById('styleButtons');
+	        Object.keys(STYLES).forEach(id => {
+	            const btn = document.createElement('button');
+	            btn.className = 'style-btn' + (parseInt(id) === currentStyleId ? ' active' : '');
+	            btn.textContent = STYLES[id].name;
+	            btn.dataset.styleId = id;
+	            btn.addEventListener('click', function () {
+	                currentStyleId = parseInt(this.dataset.styleId);
+	                cfg = STYLES[currentStyleId];
+	                initScene();
+	                frame = 0;
+	                // 更新按钮激活状态
+	                document.querySelectorAll('.style-btn').forEach(b => {
+	                    b.classList.remove('active');
+	                });
+	                this.classList.add('active');
+	            });
+	            buttonContainer.appendChild(btn);
+	        });
+	        // 暂停/播放
+	        const pauseBtn = document.getElementById('pauseBtn');
+	        pauseBtn.addEventListener('click', function () {
+	            isPaused = !isPaused;
+	            this.textContent = isPaused ? '▶ 播放' : '⏸ 暂停';
+	        });
+	        // 重置
+	        document.getElementById('resetBtn').addEventListener('click', function () {
+	            frame = 0;
+	            angle = 0;
+	            zoom = 1.0;
+	            autoRotate = true;
+	            isPaused = false;
+	            initScene();
+	            pauseBtn.textContent = '⏸ 暂停';
+	        });
+	        // 截图保存
+	        document.getElementById('saveBtn').addEventListener('click', function () {
+	            const link = document.createElement('a');
+	            link.download = `christmas_tree_style${currentStyleId}.png`;
+	            link.href = canvas.toDataURL('image/png');
+	            link.click();
+	        });
+	        // ==================== 鼠标交互 ====================
+	        canvas.addEventListener('mousedown', (e) => {
+	            isDragging = true;
+	            autoRotate = false;
+	            dragStartX = e.clientX - canvas.getBoundingClientRect().left;
+	            dragStartAngle = angle;
+	        });
+	        canvas.addEventListener('mousemove', (e) => {
+	            if (isDragging) {
+	                const currentX = e.clientX - canvas.getBoundingClientRect().left;
+	                angle = dragStartAngle + (currentX - dragStartX) * 0.008;
+	            }
+	        });
+	        canvas.addEventListener('mouseup', () => { isDragging = false; });
+	        canvas.addEventListener('mouseleave', () => { isDragging = false; });
+	        canvas.addEventListener('dblclick', () => { autoRotate = true; });
+	        // 滚轮缩放
+	        canvas.addEventListener('wheel', (e) => {
+	            e.preventDefault();
+	            const delta = e.deltaY > 0 ? 0.95 : 1.05;
+	            zoom = Math.max(0.5, Math.min(2.0, zoom * delta));
+	        }, { passive: false });
+	        // 触摸支持
+	        let touchStartX = 0;
+	        canvas.addEventListener('touchstart', (e) => {
+	            autoRotate = false;
+	            touchStartX = e.touches[0].clientX;
+	            dragStartAngle = angle;
+	        }, { passive: true });
+	        canvas.addEventListener('touchmove', (e) => {
+	            const dx = e.touches[0].clientX - touchStartX;
+	            angle = dragStartAngle + dx * 0.008;
+	            e.preventDefault();
+	        }, { passive: false });
+	        // ==================== 动画主循环 ====================
+	        function animate() {
+	            // FPS 计算
+	            const now = performance.now();
+	            const deltaTime = now - lastTime;
+	            lastTime = now;
+	            fpsCount++;
+	            fpsTimer += deltaTime;
+	            if (fpsTimer >= 1000) {
+	                fpsDisplay.textContent = `FPS: ${fpsCount}`;
+	                fpsCount = 0;
+	                fpsTimer = 0;
+	            }
+	            // 更新动画
+	            if (!isPaused) {
+	                frame++;
+	                // MATLAB: angle = 2*pi*(f/n_frames), 一圈 N_FRAMES 帧
+	                if (autoRotate && !isDragging) {
+	                    angle = 2 * Math.PI * ((frame % N_FRAMES) / N_FRAMES);
+	                }
+	            }
+	            // 渲染
+	            render();
+	            // 下一帧
+	            requestAnimationFrame(animate);
+	        }
+	        // ==================== 启动 ====================
+	        initScene();
+	        animate();
+	    </script>
+	</body>
+	</html>
